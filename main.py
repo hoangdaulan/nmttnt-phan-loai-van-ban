@@ -135,7 +135,7 @@ def predict_naive_bayes(text_tokens, log_priors, log_likelihoods, vocab):
     return max(scores, key=scores.get)
 
 # 7. Tính toán các chỉ số đánh giá chi tiết hơn (Precision, Recall, F1-Score)
-def evaluate_metrics(test_set, log_priors, log_likelihoods, vocab):
+def evaluate_metrics(test_set, log_priors, log_likelihoods, vocab, total_docs, train_size, test_size, doc_count):
     #tp: True Positives (Số email spam được dự đoán đúng)
     #tn: True Negatives (Số email ham được dự đoán đúng)
     #fp: False Positives (Số email ham bị dự đoán nhầm thành spam)
@@ -165,6 +165,10 @@ def evaluate_metrics(test_set, log_priors, log_likelihoods, vocab):
     print(f"Precision (Độ chuẩn xác)     : {precision*100:.2f}%")
     print(f"Recall    (Độ bao phủ)       : {recall*100:.2f}%")
     print(f"F1-Score                     : {f1_score*100:.2f}%")
+    print(f"Tổng: {total_docs} | Train: {train_size} | Test: {test_size}")
+    print(f"Vocabulary size: {len(vocab)}")
+    print(f"Spam docs: {doc_count['spam']}, Ham docs: {doc_count['ham']}")
+    print(f"Log priors: {log_priors}")
 
     return accuracy, precision, recall, f1_score
 
@@ -222,7 +226,7 @@ if __name__ == "__main__":
         log_priors, log_likelihoods = train_naive_bayes(vocab, word_freq, doc_count)
 
         # 3. Đánh giá (tùy chọn)
-        evaluate_metrics(test_set, log_priors, log_likelihoods, vocab)
+        evaluate_metrics(test_set, log_priors, log_likelihoods, vocab, len(combined_dataset), len(train_set), len(test_set), doc_count)
 
         # 4. LƯU LẠI SAU KHI TRAIN XONG
         save_model(model_file, vocab, log_priors, log_likelihoods)
