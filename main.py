@@ -1,27 +1,57 @@
 import csv
+import json
+import os
 import re
 import random
 import math
 
+from underthesea import word_tokenize
+
 # 1. Chuẩn hóa văn bản: Chuyển chữ thường, bỏ dấu câu, tách từ
 def clean_text(text):
     text = text.lower()
-    text = re.sub(r'[^a-z0-9\s]', '', text) # Chỉ giữ lại chữ cái và số
+    # Loại bỏ dấu câu nhưng GIỮ LẠI chữ cái (bao gồm có dấu) và số
+    text = re.sub(r'[^\w\s]', '', text)
+
+    # Tách từ tiếng Việt (nối từ ghép bằng dấu gạch dưới, VD: "học sinh" -> "học_sinh")
+    text = word_tokenize(text, format="text")
+
     return text.split()
 
 # 2. Đọc file dữ liệu
-def load_data(file_path):
+def load_data(file_path, limit=None):
     dataset = []
-    with open(file_path, 'r', encoding='utf-8') as file:
+    print(f"Đang đọc dữ liệu từ: {file_path}...")
+
+    # utf-8-sig đọc an toàn cho cả file cũ và file mới bị dính BOM
+    with open(file_path, 'r', encoding='utf-8-sig') as file:
         reader = csv.reader(file)
-        next(reader) # Bỏ qua dòng tiêu đề (header)
+        next(reader) # Bỏ qua tiêu đề
+
+        row_count = 0
         for row in reader:
             if len(row) >= 2:
-                # Cần điều chỉnh index tùy theo cấu trúc file của bạn
-                label = row[0].strip().lower() # Giả sử cột 0 là nhãn (spam/ham)
-                text = row[1]                  # Giả sử cột 1 là nội dung email
-                if label in ['spam', 'ham']:
-                    dataset.append((clean_text(text), label))
+                # Lấy nhãn và chuẩn hóa
+                raw_label = str(row[0]).strip().lower()
+
+                if raw_label in ['1', 'spam']:
+                    label = 'spam'
+                elif raw_label in ['0', 'ham']:
+                    label = 'ham'
+                else:
+                    continue # Bỏ qua nếu dòng bị lỗi nhãn
+
+                text = row[1]
+                dataset.append((clean_text(text), label))
+
+                row_count += 1
+                # if row_count % 500 == 0:
+                #     print(f" -> [{file_path}] Đã xử lý {row_count} dòng...")
+
+                if limit and row_count >= limit:
+                    break
+
+    print(f"✅ Hoàn tất tải {len(dataset)} dòng từ {file_path}!")
     return dataset
 
 # 3. Chia dữ liệu thành tập Train (để huấn luyện) và Test (để đánh giá)
@@ -66,6 +96,32 @@ def train_naive_bayes(vocab, word_freq, class_count):
             # Sử dụng Laplace smoothing (count + 1) để tránh log(0) khi từ không xuất hiện trong lớp đó
 
     return log_priors, log_likelihoods
+
+def save_model(file_path, vocab, log_priors, log_likelihoods):
+    """Lưu 3 biến cốt lõi của mô hình ra file JSON"""
+    model_data = {
+        # json không hiểu kiểu dữ liệu Set, nên phải ép vocab về List
+        'vocab': list(vocab),
+        'log_priors': log_priors,
+        'log_likelihoods': log_likelihoods
+    }
+    with open(file_path, 'w', encoding='utf-8') as f:
+        # indent=4 giúp file json mở ra nhìn đẹp và dễ đọc
+        json.dump(model_data, f, ensure_ascii=False, indent=4)
+    print(f"💾 Đã lưu mô hình thành công tại: {file_path}")
+
+def load_model(file_path):
+    """Đọc file JSON và trả về 3 biến mô hình"""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        model_data = json.load(f)
+
+    # Ép ngược list thành set để tốc độ tra cứu từ khóa nhanh nhất
+    vocab = set(model_data['vocab'])
+    log_priors = model_data['log_priors']
+    log_likelihoods = model_data['log_likelihoods']
+
+    print(f"📂 Đã tải mô hình thành công từ: {file_path}")
+    return vocab, log_priors, log_likelihoods
 
 # 6. Dự đoán nhãn cho một văn bản
 def predict_naive_bayes(text_tokens, log_priors, log_likelihoods, vocab):
@@ -143,16 +199,33 @@ def interactive_test(log_priors, log_likelihoods, vocab):
             print("-> 🟢 KẾT QUẢ: EMAIL BÌNH THƯỜNG (HAM)")
 
 if __name__ == "__main__":
-    file_name = 'data_preprocessing/final_huge_spam_dataset.csv'
+    # Khai báo tên file để lưu mô hình
+    model_file = "spam_model.json"
 
-    dataset = load_data(file_name)
-    train_set, test_set = split_data(dataset)
-    vocab, word_freq, doc_count = build_frequency_model(train_set)
-    log_priors, log_likelihoods = train_naive_bayes(vocab, word_freq, doc_count)
-    accuracy, precision, recall, f1_score = evaluate_metrics(test_set, log_priors, log_likelihoods, vocab)
-    print(f"Tổng: {len(dataset)} | Train: {len(train_set)} | Test: {len(test_set)}")
-    print(f"Vocabulary size: {len(vocab)}")
-    print(f"Spam docs: {doc_count['spam']}, Ham docs: {doc_count['ham']}")
-    print(f"Log priors: {log_priors}")
+    if os.path.exists(model_file):
+        print("-> Tìm thấy file mô hình cũ. Đang tải lên...")
+        vocab, log_priors, log_likelihoods = load_model(model_file)
 
+    else:
+        print("-> Chưa có mô hình. Bắt đầu quá trình đọc dữ liệu và huấn luyện...")
+        # 1. Đọc và gộp file
+        file_en = 'data_preprocessing/final_huge_spam_dataset.csv'
+        dataset_en = load_data(file_en, limit=5000)
+        file_vi = 'data_preprocessing/multilingual_huge_dataset.csv'
+        dataset_vi = load_data(file_vi, limit=5000)
+        combined_dataset = dataset_en + dataset_vi
+
+        train_set, test_set = split_data(combined_dataset)
+
+        # 2. Huấn luyện (Đã sửa lại đúng tên hàm build_frequency_model)
+        vocab, word_freq, doc_count = build_frequency_model(train_set)
+        log_priors, log_likelihoods = train_naive_bayes(vocab, word_freq, doc_count)
+
+        # 3. Đánh giá (tùy chọn)
+        evaluate_metrics(test_set, log_priors, log_likelihoods, vocab)
+
+        # 4. LƯU LẠI SAU KHI TRAIN XONG
+        save_model(model_file, vocab, log_priors, log_likelihoods)
+
+    # KHỞI ĐỘNG CHẾ ĐỘ TEST TAY
     interactive_test(log_priors, log_likelihoods, vocab)
